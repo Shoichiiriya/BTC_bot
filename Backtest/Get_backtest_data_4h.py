@@ -5,8 +5,8 @@ from pprint import pprint
 import json
 
 start_unix_time = 1483196400
-chart_sec = 60         # 保存したいローソク足の時間軸
-file = "./test_data_1min.json"   # 保存するファイル名
+chart_sec = 14400         # 保存したいローソク足の時間軸
+file = "./test_data_4h.json"   # 保存するファイル名
 
 
 def accumulate_data(min, path, before=0, after=0):
@@ -66,9 +66,9 @@ def accumulate_diff_data(min, path, before=0, after=0):
 # ここからメイン
 #accumulate_data(chart_sec, file ,after=start_unix_time)
 # i = 0
-add_unix = chart_sec * 6000 - 100
+#add_unix = chart_sec * 6000 - 100
 # while i < 3:
 # 	add_unix = add_unix + (chart_sec * 6000 - 100)
 
 # 	# 差分の価格データを保存する
-accumulate_diff_data(chart_sec, file, after=add_unix)
+accumulate_diff_data(chart_sec, file, after=start_unix_time)
