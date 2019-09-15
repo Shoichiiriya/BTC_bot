@@ -6,7 +6,7 @@ import json
 
 start_unix_time = 1483196400
 chart_sec = 300         # 保存したいローソク足の時間軸
-file = "./test_data_5min.json"   # 保存するファイル名
+file = "./Testdata/test_data_5min.json"   # 保存するファイル名
 
 
 def accumulate_data(min, path, before=0, after=0):
