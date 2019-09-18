@@ -10,9 +10,13 @@ import pandas as pd
 
 # ----バックテスト用の初期設定値
 chart_sec = 3600            # 5分足
-lot = 100                    # 1トレードの枚数
+lot = 0.2                    # 1トレードの枚数
 slippage = 0.0005          # 手数料やスリッページ（0.05％初期値）
 close_condition = 0        # エントリー後、n足が経過するまでは手仕舞わない（初期値０）
+term = 42        # 過去ｎ期間の設定
+wait = 0          # ループの待機時間
+
+
 
 backdata = "./Backtest/Testdata/test_data_1h.json"
 
@@ -87,52 +91,31 @@ def check_descend( data,last_data ):
 	else:
 		return False
 
-
 # 買いシグナルが出たら指値で買い注文を出す関数
-def buy_signal( data,last_data,flag ):
-	if flag["buy_signal"] == 0 and check_candle( data,"buy" ):
-		flag["buy_signal"] = 1
-
-	elif flag["buy_signal"] == 1 and check_candle( data,"buy" )  and check_ascend( data,last_data ):
-		flag["buy_signal"] = 2
-
-	elif flag["buy_signal"] == 2 and check_candle( data,"buy" )  and check_ascend( data,last_data ):
-		log = "３本連続で陽線 なので" + str(data["close_price"]) + "円で買い指値を入れます\n"
-		flag["records"]["log"].append(log)
-		flag["buy_signal"] = 3
-		
-		# ここにBitflyerへの買い注文コードを入れる
-
+def buy_signal(data, last_data, flag):
+    
+	highest_price = max(i["high_price"] for i in last_data)
+	if highest_price < data["high_price"]:
 		flag["order"]["exist"] = True
 		flag["order"]["side"] = "BUY"
 		flag["order"]["price"] = round(data["close_price"] * lot)
-	
-	else:
-		flag["buy_signal"] = 0
+		log = str(term) + "期間中、最高値なので" + str(data["close_price"]) + "USDで売り指値を入れます\n"
+		flag["records"]["log"].append(log)
+        
 	return flag
 
 
 # 売りシグナルが出たら指値で売り注文を出す関数
 def sell_signal( data,last_data,flag ):
-	if flag["sell_signal"] == 0 and check_candle( data,"sell" ):
-		flag["sell_signal"] = 1
+	lowest_price = min(i["low_price"] for i in last_data)
 
-	elif flag["sell_signal"] == 1 and check_candle( data,"sell" )  and check_descend( data,last_data ):
-		flag["sell_signal"] = 2
-
-	elif flag["sell_signal"] == 2 and check_candle( data,"sell" )  and check_descend( data,last_data ):
-		log = "３本連続で陰線 なので" + str(data["close_price"]) + "円で売り指値を入れます\n"
-		flag["records"]["log"].append(log)
-		flag["sell_signal"] = 3
-		
-		# ここにBitflyerへの売り注文コードを入れる
-
+	if lowest_price > data["low_price"]:
 		flag["order"]["exist"] = True
 		flag["order"]["side"] = "SELL"
 		flag["order"]["price"] = round(data["close_price"] * lot)
-		
-	else:
-		flag["sell_signal"] = 0
+		log = str(term) + "期間中、最低値なので" + str(data["close_price"]) + "USDで売り指値を入れます\n"
+		flag["records"]["log"].append(log)
+        
 	return flag
 
 
@@ -141,28 +124,38 @@ def close_position( data,last_data,flag ):
 	flag["position"]["count"] += 1
 	
 	if flag["position"]["side"] == "BUY":
-		if data["close_price"] < last_data["close_price"] and flag["position"]["count"] > close_condition:
-			log = "前回の終値を下回ったので" + str(data["close_price"]) + "円あたりで成行で決済します\n"
+		#if data["close_price"] < last_data[term-1]["close_price"] and flag["position"]["count"] > close_condition:
+		lowest_price = min(i["low_price"] for i in last_data)
+		if lowest_price > data["low_price"]:
+			log = "前回の終値を下回ったので" + str(data["close_price"]) + "USDあたりで成行で決済します\n"
 			flag["records"]["log"].append(log)
 			
 			# 決済の成行注文コードを入れる
 
 			records( flag,data )
 			flag["position"]["exist"] = False
+			flag["records"]["buy-term"].append(flag["position"]["count"])
 			flag["position"]["count"] = 0
+
+			
 			
 	if flag["position"]["side"] == "SELL":
-		if data["close_price"] > last_data["close_price"] and flag["position"]["count"] > close_condition:
-			log = "前回の終値を上回ったので" + str(data["close_price"]) + "円あたりで成行で決済します\n"
+		#if data["close_price"] > last_data["close_price"] and flag["position"]["count"] > close_condition:
+		highest_price = max(i["high_price"] for i in last_data)
+		if highest_price < data["high_price"]:
+			log = "前回の終値を上回ったので" + str(data["close_price"]) + "USDあたりで成行で決済します\n"
 			flag["records"]["log"].append(log)
 			
 			# 決済の成行注文コードを入れる
 
 			records( flag,data )
 			flag["position"]["exist"] = False
+			flag["records"]["sell-term"].append(flag["position"]["count"])
 			flag["position"]["count"] = 0
-	return flag
+			
 
+			
+	return flag
 
 # サーバーに出した注文が約定したかどうかチェックする関数
 def check_order( flag ):
@@ -185,8 +178,10 @@ def records(flag,data):
 	entry_price = flag["position"]["price"]
 	exit_price = round(data["close_price"] * lot)
 	trade_cost = round( exit_price * slippage )
-	
-	log = "スリッページ・手数料として " + str(trade_cost) + "円を考慮します\n"
+	drawdown = max(flag["records"]["gross-profit"]) - flag["records"]["gross-profit"][-1] 
+	if  drawdown > flag["records"]["drawdown"]:
+		flag["records"]["drawdown"] = drawdown
+	log = "スリッページ・手数料として " + str(trade_cost) + "USDを考慮します\n"
 	flag["records"]["log"].append(log)
 	flag["records"]["slippage"].append(trade_cost)
 	
@@ -204,10 +199,10 @@ def records(flag,data):
 
 		if buy_profit  > 0:
 			flag["records"]["buy-winning"] += 1
-			log = str(buy_profit) + "円の利益です\n"
+			log = str(buy_profit) + "USDの利益です\n"
 			flag["records"]["log"].append(log)
 		else:
-			log = str(buy_profit) + "円の損失です\n"
+			log = str(buy_profit) + "USDの損失です\n"
 			flag["records"]["log"].append(log)
 	
 	if flag["position"]["side"] == "SELL":
@@ -218,10 +213,10 @@ def records(flag,data):
 		flag["records"]["date"].append( data["close_time_dt"])
 		if sell_profit > 0:
 			flag["records"]["sell-winning"] += 1
-			log = str(sell_profit) + "円の利益です\n"
+			log = str(sell_profit) + "USDの利益です\n"
 			flag["records"]["log"].append(log)
 		else:
-			log = str(sell_profit) + "円の損失です\n"
+			log = str(sell_profit) + "USDの損失です\n"
 			flag["records"]["log"].append(log)
 	
 	return flag
@@ -232,30 +227,35 @@ def backtest(flag):
 	
 	buy_gross_profit = np.sum(flag["records"]["buy-profit"])
 	sell_gross_profit = np.sum(flag["records"]["sell-profit"])
-	
-	print("バックテストの結果")
-	print("--------------------------")
-	print("買いエントリの成績")
-	print("--------------------------")
-	print("トレード回数  :  {}回".format(flag["records"]["buy-count"] ))
-	print("勝率          :  {}％".format(round(flag["records"]["buy-winning"] / flag["records"]["buy-count"] * 100,1)))
-	print("平均リターン  :  {}％".format(round(np.average(flag["records"]["buy-return"]),4)))
-	print("総損益        :  {}円".format( np.sum(flag["records"]["buy-profit"]) ))
-	
-	print("--------------------------")
-	print("売りエントリの成績")
-	print("--------------------------")
-	print("トレード回数  :  {}回".format(flag["records"]["sell-count"] ))
-	print("勝率          :  {}％".format(round(flag["records"]["sell-winning"] / flag["records"]["sell-count"] * 100,1)))
-	print("平均リターン  :  {}％".format(round(np.average(flag["records"]["sell-return"]),4)))
-	print("総損益        :  {}円".format( np.sum(flag["records"]["sell-profit"]) ))
-	
-	print("--------------------------")
-	print("総合の成績")
-	print("--------------------------")
-	print("総損益        :  {}円".format( np.sum(flag["records"]["sell-profit"]) + np.sum(flag["records"]["buy-profit"]) ))
-	print("手料合計    :  {}円".format( np.sum(flag["records"]["slippage"]) ))
-	
+	try:
+		print("バックテストの結果")
+		print("--------------------------")
+		print("買いエントリの成績")
+		print("--------------------------")
+		print("トレード回数  :  {}回".format(flag["records"]["buy-count"] ))
+		print("勝率          :  {}％".format(round(flag["records"]["buy-winning"] / flag["records"]["buy-count"] * 100,1)))
+		print("平均リターン  :  {}％".format(round(np.average(flag["records"]["buy-return"]),4)))
+		print("総損益        :  {} USD".format( np.sum(flag["records"]["buy-profit"]) ))
+		print("平均保有期間   :  {}足".format( round(np.mean(flag["records"]["buy-term"]),2)))
+		
+
+		print("--------------------------")
+		print("売りエントリの成績")
+		print("--------------------------")
+		print("トレード回数  :  {}回".format(flag["records"]["sell-count"] ))
+		print("勝率          :  {}％".format(round(flag["records"]["sell-winning"] / flag["records"]["sell-count"] * 100,1)))
+		print("平均リターン  :  {}％".format(round(np.average(flag["records"]["sell-return"]),4)))
+		print("総損益        :  {} USD".format( np.sum(flag["records"]["sell-profit"]) ))
+		print("平均保有期間   :  {}足".format( round(np.mean(flag["records"]["sell-term"]),2)))
+
+		print("--------------------------")
+		print("総合の成績")
+		print("--------------------------")
+		print("最大ドローダウン：　{0} USD / {1}%".format(-1 * flag["records"]["drawdown"], -1 * round(flag["records"]["drawdown"]/max(flag["records"]["gross-profit"])*100,1)))
+		print("総損益        :  {} USD".format( np.sum(flag["records"]["buy-profit"]) + np.sum(flag["records"]["sell-profit"]) ) )
+		print("手料合計    :  {} USD".format( np.sum(flag["records"]["slippage"]) ))
+	except:
+		print("error")
     # 損益曲線をプロット
 	del flag["records"]["gross-profit"][0] # X軸/Y軸のデータ数を揃えるため、先頭の0を削除
 	date_list = pd.to_datetime( flag["records"]["date"] ) # 日付型に変換
@@ -308,60 +308,51 @@ flag = {
 		"buy-winning" : 0,
 		"buy-return":[],
 		"buy-profit": [],
+		"buy-term":[],
 		
 		"sell-count": 0,
 		"sell-winning" : 0,
 		"sell-return":[],
 		"sell-profit":[],
-        
+		"sell-term":[],
+
+		"drawdown":0,
 		"date":[],
 	    "gross-profit":[0],
 		"slippage":[],
 		"log":[]
 	}
 }
-
+price = get_price(chart_sec)
+last_data = []
 i = 1
 while i < len(price):
-	if flag["order"]["exist"]:
-		flag = check_order( flag )
+	if len(last_data) < term:
+		last_data.append(price[i])
+		print_price(price[i])
+		time.sleep(wait)
+		i += 1
+		continue
 	
 	data = price[i]
+	print_price(data)
+	
+	if flag["order"]["exist"]:
+		flag = check_order( flag )
+
 	flag = log_price(data,flag)
 	
 	if flag["position"]["exist"]:
-		flag = close_position( data,last_data,flag )			
+		flag = close_position( data, last_data, flag )			
 	else:
-		flag = buy_signal( data,last_data,flag )
+		flag = buy_signal( data,last_data, flag )
 		flag = sell_signal( data,last_data,flag )
-	last_data["close_time"] = data["close_time"]
-	last_data["open_price"] = data["open_price"]
-	last_data["close_price"] = data["close_price"]
-	i+=1
+	del last_data[0]
+	last_data.append( data )
+	i += 1
+	time.sleep(wait)
 
 backtest(flag)
     
     
-highest_price = price[j]["high_price"]
-j = 0
-price_20day[20]
-buy_signal(data, flag):
-     
-    for idx, val in enumerate(price_20day):
-        if temp < price_20day[idx]:
-            temp = price_20day[idx]
-    highest_price = temp
 
-    if highest_price < price[j]["high_price"]:
-		flag["order"]["exist"] = True
-		flag["order"]["side"] = "BUY"
-		flag["order"]["price"] = round(data["close_price"] * lot)
-        flag["records"]["log"].append(log)
-        price_20day[j] = price[j]["high_price"]
-        
-    if j == 20:
-        j = 0
-    else:
-        j = j + 1
-
-    return flag
