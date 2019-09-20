@@ -5,7 +5,7 @@ from pprint import pprint
 import json
 
 chart_sec = 60      # ローソク足の時間軸
-file = "./test_data_1min.json"    # 読み込む価格ファイル
+file = "./Testdata/test_data_1min.json"    # 読み込む価格ファイル
 start_period = "2019/09/12 00:00"
 end_period = "2019/09/15 00:00"
 
